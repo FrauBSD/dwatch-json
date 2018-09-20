@@ -1,0 +1,33 @@
+# -*- tab-width: 4 -*- ;; Emacs
+# vi: set filetype=sh tabstop=8 shiftwidth=8 noexpandtab :: Vi/ViM
+############################################################ IDENT(1)
+#
+# $Title: dwatch(8) JSON module for network activity $
+# $Copyright: 2014-2018 Devin Teske. All rights reserved. $
+# $FrauBSD: dwatch-json/json-net 2018-09-20 14:46:58 -0700 freebsdfrau $
+#
+############################################################ DESCRIPTION
+#
+# Produce JSON custom log format for network activity
+#
+############################################################ PROBE
+
+_RAW_PROFILE=json-net-raw
+load_profile $_RAW_PROFILE
+
+############################################################ MAIN
+
+if [ "$DEBUG$EXIT_AFTER_COMPILE" ]; then
+	eval dwatch $ARGV -qX $_RAW_PROFILE
+	exit
+fi
+
+info "Watching '$PROBE' ..."
+eval dwatch $ARGV -qX $_RAW_PROFILE | awk '
+	sub(/^.*: /, "") { print; fflush() }
+' # END-QUOTE
+exit $SUCCESS
+
+################################################################################
+# END
+################################################################################

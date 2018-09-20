@@ -1,0 +1,226 @@
+# -*- tab-width: 4 -*- ;; Emacs
+# vi: set filetype=sh tabstop=8 shiftwidth=8 noexpandtab :: Vi/ViM
+############################################################ IDENT(1)
+#
+# $Title: dwatch(8) JSON module for network activity $
+# $Copyright: 2014-2018 Devin Teske. All rights reserved. $
+# $FrauBSD: dwatch-json/json-net-raw 2018-09-20 14:46:58 -0700 freebsdfrau $
+#
+############################################################ DESCRIPTION
+#
+# Produce JSON custom log format for network activity
+#
+############################################################ PROBE
+
+: ${PROBE:=$( echo \
+	tcp:::debug-user, \
+	tcp:::state-change, \
+	udp:::send, \
+	fbt::soreceive_dgram:entry )}
+
+############################################################ EVENT ACTION
+
+EVENT_TEST='this->event != ""'
+
+############################################################ ACTIONS
+
+exec 9<<EOF
+this string	event;
+this string	family;
+this string	local;
+this string	remote;
+this u_char	local6;
+this u_char	remote6;
+this uint16_t	lport;
+this uint16_t	rport;
+this uint32_t	length;
+
+struct socket *	urecv_socket;
+struct inpcb *	urecv_inpcb;
+string		urecv_local;
+string		urecv_remote;
+u_char		urecv_local6;
+u_char		urecv_remote6;
+uint16_t	urecv_lport;
+uint16_t	urecv_rport;
+uint32_t	urecv_length;
+
+/****************************** TCP ******************************/
+
+tcp:::send,
+tcp:::receive /* probe ID $ID */
+{${TRACE:+
+	printf("<$ID>");}
+        this->length = (uint32_t)args[2]->ip_plength -
+                (uint8_t)args[4]->tcp_offset;
+}
+
+tcp:::debug-user /* probe ID $(( $ID + 1 )) */
+{${TRACE:+
+	printf("<$(( $ID + 1 ))>");
+}
+	/*
+	 * tcpsinfo_t *
+	 */
+	this->local  = args[0]->tcps_laddr;
+	this->lport  = args[0]->tcps_lport;
+	this->remote = args[0]->tcps_raddr;
+	this->rport  = args[0]->tcps_rport;
+
+	/*
+	 * IPv6 support
+	 */
+	this->local6 = strstr(this->local, ":") != NULL ? 1 : 0;
+	this->remote6 = strstr(this->remote, ":") != NULL ? 1 : 0;
+	this->local = strjoin(strjoin(this->local6 ? "[" : "",
+		this->local), this->local6 ? "]" : "");
+	this->remote = strjoin(strjoin(this->remote6 ? "[" : "",
+		this->remote), this->remote6 ? "]" : "");
+
+	this->family = "tcp";
+	this->event = prureq_string[arg1];
+}
+
+tcp:::state-change /* probe ID $(( $ID + 2 )) */
+{${TRACE:+
+	printf("<$(( $ID + 2 ))>");
+}
+	/*
+	 * tcpsinfo_t *
+	 */
+	this->local    = args[3]->tcps_laddr;
+	this->lport    = (uint16_t)args[3]->tcps_lport;
+	this->remote   = args[3]->tcps_raddr;
+	this->rport    = (uint16_t)args[3]->tcps_rport;
+	this->to_state = (int32_t)args[3]->tcps_state;
+
+	/*
+	 * tcplsinfo_t *
+	 */
+	this->from_state = (int32_t)args[5]->tcps_state;
+
+	/*
+	 * IPv6 support
+	 */
+	this->local6 = strstr(this->local, ":") != NULL ? 1 : 0;
+	this->remote6 = strstr(this->remote, ":") != NULL ? 1 : 0;
+	this->local = strjoin(strjoin(this->local6 ? "[" : "",
+		this->local), this->local6 ? "]" : "");
+	this->remote = strjoin(strjoin(this->remote6 ? "[" : "",
+		this->remote), this->remote6 ? "]" : "");
+
+	this->family = "tcp";
+	this->event = this->to_state == TCPS_CLOSED ? "CLOSE" : "";
+	this->length = 0;
+}
+
+/****************************** UDP ******************************/
+
+udp:::send /* probe ID $(( $ID + 3 )) */
+{${TRACE:+
+	printf("<$(( $ID + 3 ))>");
+}
+	/*
+	 * ipinfo_t *
+	 */
+	this->local  = args[2]->ip_saddr;
+	this->remote = args[2]->ip_daddr;
+
+	/*
+	 * udpinfo_t *
+	 */
+	this->length = (uint16_t)args[4]->udp_length;
+	this->lport  = args[4]->udp_sport;
+	this->rport  = args[4]->udp_dport;
+
+	/*
+	 * IPv6 support
+	 */
+	this->local6 = strstr(this->local, ":") != NULL ? 1 : 0;
+	this->remote6 = strstr(this->remote, ":") != NULL ? 1 : 0;
+	this->local = strjoin(strjoin(this->local6 ? "[" : "",
+		this->local), this->local6 ? "]" : "");
+	this->remote = strjoin(strjoin(this->remote6 ? "[" : "",
+		this->remote), this->remote6 ? "]" : "");
+
+	this->family = "udp";
+	this->event = "SEND";
+}
+
+udp:::receive /* probe ID $(( $ID + 4 )) */
+{${TRACE:+
+	printf("<$(( $ID + 4 ))>");
+}
+	/*
+	 * csinfo_t *
+	 */
+	urecv_inpcb = (struct inpcb *)args[1]->cs_cid;
+	urecv_socket = urecv_inpcb->inp_socket;
+
+	/*
+	 * ipinfo_t *
+	 */
+	urecv_local  = args[2]->ip_daddr;
+	urecv_remote = args[2]->ip_saddr;
+
+	/*
+	 * udpinfo_t *
+	 */
+	urecv_length = (uint16_t)args[4]->udp_length;
+	urecv_lport  = args[4]->udp_dport;
+	urecv_rport  = args[4]->udp_sport;
+
+	/*
+	 * IPv6 support
+	 */
+	urecv_local6 = strstr(urecv_local, ":") != NULL ? 1 : 0;
+	urecv_remote6 = strstr(urecv_remote, ":") != NULL ? 1 : 0;
+	urecv_local = strjoin(strjoin(urecv_local6 ? "[" : "",
+		urecv_local), urecv_local6 ? "]" : "");
+	urecv_remote = strjoin(strjoin(urecv_remote6 ? "[" : "",
+		urecv_remote), urecv_remote6 ? "]" : "");
+}
+
+fbt::soreceive_dgram:entry
+	/args[0] == urecv_socket/ /* probe ID $(( $ID + 5 )) */
+{${TRACE:+
+	printf("<$(( $ID + 5 ))>");
+}
+	this->local = urecv_local;
+	this->remote = urecv_remote;
+	this->length = urecv_length;
+	this->lport = urecv_lport;
+	this->rport = urecv_rport;
+	this->local6 = urecv_local6;
+	this->remote6 = urecv_remote6;
+
+	this->event = "RCVD";
+	this->family = "udp";
+}
+EOF
+ACTIONS=$( cat <&9 )
+ID=$(( $ID + 6 ))
+
+############################################################ EVENT DETAILS
+
+exec 9<<EOF
+	/*
+	 * Print path details
+	 */
+	printf("{\"report_type\":\"coturn_tcp_udp_info\",\"epoch\":%u,\"family\":\"%s\",\"local\":\"%s\",\"lport\":%u,\"event\":\"%s\",\"remote\":\"%s\",\"rport\":%u,\"length\":%u}",
+		walltimestamp / 1000000000,
+		this->family,
+		this->local,
+		this->lport,
+		this->event,
+		this->remote,
+		this->rport,
+		this->length);
+
+	this->event = "";
+EOF
+EVENT_DETAILS=$( cat <&9 )
+
+################################################################################
+# END
+################################################################################

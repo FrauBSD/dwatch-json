@@ -1,0 +1,151 @@
+# -*- tab-width: 4 -*- ;; Emacs
+# vi: set filetype=sh tabstop=8 shiftwidth=8 noexpandtab :: Vi/ViM
+############################################################ IDENT(1)
+#
+# $Title: dwatch(8) JSON module for network activity $
+# $Copyright: 2014-2018 Devin Teske. All rights reserved. $
+# $FrauBSD: dwatch-json/json-net-top-raw 2018-09-20 14:46:58 -0700 freebsdfrau $
+#
+############################################################ DESCRIPTION
+#
+# Produce JSON custom log format for network activity
+#
+############################################################ PROBE
+
+: ${PROBE:=profile-10s}
+
+############################################################ OVERRIDES
+
+MAX_ARGS=0		# -B num
+MAX_DEPTH=0		# -K num
+
+#
+# Unsupported features
+#
+unset EXECREGEX		# -z regex
+unset GROUP		# -g group
+unset PID		# -p pid
+unset PROBE_COALESCE	# -F
+unset PSTREE		# -R
+unset USER		# -u user
+
+############################################################ EVENT ACTION
+
+_EVENT_TEST="${EVENT_TEST:+($EVENT_TEST)}"
+_EVENT_TEST="${CUSTOM_TEST:+$CUSTOM_TEST${EVENT_TEST:+ && }}$_EVENT_TEST"
+EVENT_TEST="cpu == 0"
+CUSTOM_TEST=
+
+############################################################ ACTIONS
+
+exec 9<<EOF
+this uint32_t	length;
+
+uint32_t	tcp_rcvd;
+uint32_t	tcp_sent;
+uint32_t	udp_rcvd;
+uint32_t	udp_sent;
+struct socket *	urecv_socket;
+struct inpcb *	urecv_inpcb;
+uint32_t	trecv_length;
+uint32_t	urecv_length;
+
+BEGIN /* probe ID $ID */
+{${TRACE:+
+	printf("<$ID>");}
+	tcp_rcvd = tcp_sent = 0;
+	udp_rcvd = udp_sent = 0;
+}
+
+/****************************** TCP ******************************/
+
+tcp:::receive /* probe ID $(( $ID + 1 )) */
+{${TRACE:+
+	printf("<$(( $ID + 1 ))>");}
+	this->length = (uint32_t)args[2]->ip_plength -
+                (uint8_t)args[4]->tcp_offset;
+}
+
+tcp:::debug-user
+	/arg1 == PRU_RCVD${_EVENT_TEST:+ && ($_EVENT_TEST)}/
+	/* probe ID $(( $ID + 2 )) */
+{${TRACE:+
+	printf("<$(( $ID + 2 ))>");}
+	tcp_rcvd += this->length;
+	this->length = 0;
+}
+
+tcp:::send ${_EVENT_TEST:+/ $_EVENT_TEST / }/* probe ID $(( $ID + 3 )) */
+{${TRACE:+
+	printf("<$(( $ID + 3 ))>");}
+	tcp_sent += (uint32_t)args[2]->ip_plength -
+                (uint8_t)args[4]->tcp_offset;
+}
+
+/****************************** UDP ******************************/
+
+udp:::send ${_EVENT_TEST:+/ $_EVENT_TEST / }/* probe ID $(( $ID + 4 )) */
+{${TRACE:+
+	printf("<$(( $ID + 4 ))>");}
+	udp_sent += (uint16_t)args[4]->udp_length;
+}
+
+udp:::receive /* probe ID $(( $ID + 5 )) */
+{${TRACE:+
+	printf("<$(( $ID + 5 ))>");
+}
+	/*
+	 * csinfo_t *
+	 */
+	urecv_inpcb = (struct inpcb *)args[1]->cs_cid;
+	urecv_socket = urecv_inpcb->inp_socket;
+
+	/*
+	 * udpinfo_t *
+	 */
+	urecv_length = (uint16_t)args[4]->udp_length;
+}
+
+fbt::soreceive_dgram:entry
+	/args[0] == urecv_socket${_EVENT_TEST:+ && ($_EVENT_TEST)}/
+	/* probe ID $(( $ID + 6 )) */
+{${TRACE:+
+	printf("<$(( $ID + 6 ))>");}
+	udp_rcvd += urecv_length;
+	urecv_length = 0;
+}
+EOF
+ACTIONS=$( cat <&9 )
+ID=$(( $ID + 7 ))
+
+############################################################ EVENT TAG
+
+# The EVENT_TAG is run inside the print action after the timestamp has been
+# printed. By default, `UID.GID CMD[PID]: ' of the process is printed.
+
+EVENT_TAG="printf(\"${PROFILE%-raw}: \")"
+
+############################################################ EVENT DETAILS
+
+: ${HOSTNAME:=$( hostname )}
+
+exec 9<<EOF
+	/*
+	 * Print path details
+	 */
+	printf("{\"report_type\":\"${PROFILE%-raw}\",\"hostname\":\"$HOSTNAME\",\"epoch\":%u,\"tcp_rcvd\":%u,\"tcp_sent\":%u,\"udp_rcvd\":%u,\"udp_sent\":%u}",
+		walltimestamp / 1000000000,
+		tcp_rcvd, tcp_sent,
+		udp_rcvd, udp_sent);
+
+	/*
+	 * Reset counters
+	 */
+	tcp_rcvd = tcp_sent = 0;
+	udp_rcvd = udp_sent = 0;
+EOF
+EVENT_DETAILS=$( cat <&9 )
+
+################################################################################
+# END
+################################################################################

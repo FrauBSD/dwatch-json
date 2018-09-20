@@ -1,0 +1,60 @@
+# -*- tab-width: 4 -*- ;; Emacs
+# vi: set filetype=sh tabstop=8 shiftwidth=8 noexpandtab :: Vi/ViM
+############################################################ IDENT(1)
+#
+# $Title: dwatch(8) JSON module for network activity $
+# $Copyright: 2014-2018 Devin Teske. All rights reserved. $
+# $FrauBSD: dwatch-json/json-net-top 2018-09-20 14:46:58 -0700 freebsdfrau $
+#
+############################################################ DESCRIPTION
+#
+# Produce JSON custom log format for network activity
+#
+############################################################ GLOBALS
+
+eval "$( echo "$EVENT_TEST" | awk -v argv="$ARGV" '
+	function set(var, value)
+	{
+		gsub(/'\''/,"&\\\\&&", value)
+		printf "%s='\''%s'\''\n", var, value
+	}
+	$0 { buf = buf $0 }
+	END {
+		head = buf
+		while (match(head, "execname == \"[^\"]*\"")) {
+			tail = substr(head, 1, RSTART - 1)
+			repl = substr(head, RSTART, RLENGTH)
+			head = substr(head, RSTART + RLENGTH)
+			if (sub(/ \|\|[[:space:]]*\(/, "", head))
+				sub(/\)$/, "", head)
+			sub(/^execname == "/, "", repl)
+			sub(/"$/, "", repl)
+			argv = argv " -k \"" repl "\""
+		}
+		tail = tail head
+		set("EVENT_TEST", tail)
+		set("ARGV", argv)
+	}
+' )"
+
+############################################################ PROBE
+
+_RAW_PROFILE=json-net-top-raw
+load_profile $_RAW_PROFILE
+
+############################################################ MAIN
+
+if [ "$DEBUG$EXIT_AFTER_COMPILE" ]; then
+	eval dwatch $ARGV -qX $_RAW_PROFILE
+	exit
+fi
+
+info "Watching '$PROBE' ..."
+eval dwatch $ARGV -qX $_RAW_PROFILE | awk '
+	sub(/^.*: /, "") { print; fflush() }
+' # END-QUOTE
+exit $SUCCESS
+
+################################################################################
+# END
+################################################################################
