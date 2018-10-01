@@ -4,7 +4,7 @@
 #
 # $Title: dwatch(8) JSON module for network activity $
 # $Copyright: 2014-2018 Devin Teske. All rights reserved. $
-# $FrauBSD: dwatch-json/json-net-raw 2018-09-25 11:33:29 -0700 freebsdfrau $
+# $FrauBSD: dwatch-json/json-net-raw 2018-10-01 16:07:12 -0700 freebsdfrau $
 #
 ############################################################ DESCRIPTION
 #
@@ -51,7 +51,7 @@ tcp:::send,
 tcp:::receive /* probe ID $ID */
 {${TRACE:+
 	printf("<$ID>");}
-        this->length = (uint32_t)args[2]->ip_plength -
+	this->length = (uint32_t)args[2]->ip_plength -
                 (uint8_t)args[4]->tcp_offset;
 }
 
