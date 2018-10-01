@@ -4,7 +4,7 @@
 #
 # $Title: dwatch(8) JSON module for network activity $
 # $Copyright: 2014-2018 Devin Teske. All rights reserved. $
-# $FrauBSD: dwatch-json/json-net-top-raw 2018-09-20 14:46:58 -0700 freebsdfrau $
+# $FrauBSD: dwatch-json/json-net-top-raw 2018-09-30 19:08:17 -0700 freebsdfrau $
 #
 ############################################################ DESCRIPTION
 #
@@ -33,6 +33,11 @@ unset USER		# -u user
 
 _EVENT_TEST="${EVENT_TEST:+($EVENT_TEST)}"
 _EVENT_TEST="${CUSTOM_TEST:+$CUSTOM_TEST${EVENT_TEST:+ && }}$_EVENT_TEST"
+if [ "$JID" ]; then
+	pr_id="curthread->td_proc->p_ucred->cr_prison->pr_id"
+	_EVENT_TEST="$pr_id == $JID${_EVENT_TEST:+ && ($_EVENT_TEST)}"
+	unset JID
+fi
 EVENT_TEST="cpu == 0"
 CUSTOM_TEST=
 
