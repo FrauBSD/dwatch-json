@@ -4,7 +4,7 @@
 #
 # $Title: dwatch(8) JSON module for network activity $
 # $Copyright: 2014-2018 Devin Teske. All rights reserved. $
-# $FrauBSD: dwatch-json/json-net-top 2018-09-30 19:08:17 -0700 freebsdfrau $
+# $FrauBSD: dwatch-json/json-net-top 2018-09-30 19:10:01 -0700 freebsdfrau $
 #
 ############################################################ DESCRIPTION
 #
@@ -98,7 +98,7 @@ if [ "$DEBUG$EXIT_AFTER_COMPILE" ]; then
 fi
 
 info "Watching '$PROBE' ..."
-eval dwatch $ARGV -qX $_RAW_PROFILE | awk '
+eval dwatch $ARGV -qX $_RAW_PROFILE $PROBE_ARG | awk '
 	sub(/^.*: /, "") { print; fflush() }
 ' # END-QUOTE
 exit $SUCCESS
