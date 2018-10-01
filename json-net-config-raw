@@ -1,0 +1,418 @@
+# -*- tab-width: 4 -*- ;; Emacs
+# vi: set filetype=sh tabstop=8 shiftwidth=8 noexpandtab :: Vi/ViM
+############################################################ IDENT(1)
+#
+# $Title: dwatch(8) JSON module for network activity $
+# $Copyright: 2014-2018 Devin Teske. All rights reserved. $
+# $FrauBSD: dwatch-json/json-net-config-raw 2018-10-01 15:01:11 -0700 freebsdfrau $
+#
+############################################################ DESCRIPTION
+#
+# Produce JSON custom log format for network activity
+#
+############################################################ PROBE
+
+: ${PROBE:=profile-10s}
+
+############################################################ CONFIG
+
+# Defaults
+: ${REPORT_TYPE:=${PROFILE%-raw}}
+: ${HOSTNAME:=$( hostname )}
+
+# Configured variables before loading config
+vars="$( set | awk 'match($0,
+	/^[a-zA-Z_][a-zA-Z0-9_]*=/) { print substr($0, 1, RLENGTH - 1) }'
+) vars"
+
+# Config
+. /usr/local/etc/dwatch-${PROFILE%-config*}.conf || exit
+
+# Variables found in config
+export vars
+conf=$( set | awk '
+BEGIN {
+	conf = ""
+	delete env
+	nvars = split(ENVIRON["vars"], vars)
+	for (n = 1; n <= nvars; n++) env[vars[n]]
+}
+match($0, /^[a-zA-Z_][a-zA-Z0-9_]*=/) {
+	name = substr($0, 1, RLENGTH - 1)
+	if (name in env) next
+	conf = conf " " name
+}
+END { print substr(conf, 2) }' )
+
+############################################################ OVERRIDES
+
+MAX_ARGS=0		# -B num
+MAX_DEPTH=0		# -K num
+
+#
+# Unsupported features
+#
+unset EXECREGEX		# -z regex
+unset GROUP		# -g group
+unset PID		# -p pid
+unset PROBE_COALESCE	# -F
+unset PSTREE		# -R
+unset USER		# -u user
+
+############################################################ EVENT ACTION
+
+_EVENT_TEST="${EVENT_TEST:+($EVENT_TEST)}"
+_EVENT_TEST="${CUSTOM_TEST:+$CUSTOM_TEST${EVENT_TEST:+ && }}$_EVENT_TEST"
+if [ "$JID" ]; then
+	pr_id="curthread->td_proc->p_ucred->cr_prison->pr_id"
+	_EVENT_TEST="$pr_id == $JID${_EVENT_TEST:+ && ($_EVENT_TEST)}"
+	unset JID
+fi
+EVENT_TEST="cpu == 0"
+CUSTOM_TEST=
+
+_CONF_OTHER=
+IFS=" "
+nconf=0
+for var in $conf; do
+	nconf=$(( $nconf + 1 ))
+	eval val=\"\$$var\"
+	_CONF_OTHER="$_CONF_OTHER || ($val)"
+done
+_CONF_OTHER="!(${_CONF_OTHER# || })"
+
+############################################################ ACTIONS
+
+exec 9<<EOF
+this string	event;
+this string	family;
+this string	local;
+this string	remote;
+this u_char	local6;
+this u_char	remote6;
+this uint16_t	lport;
+this uint16_t	rport;
+this uint32_t	length;
+
+uint32_t	tcp_rcvd;
+uint32_t	tcp_sent;
+uint32_t	udp_rcvd;
+uint32_t	udp_sent;
+
+$( IFS=" "
+	for var in $conf; do
+		printf "uint32_t\t%s_tcp_rcvd;\n" $var
+		printf "uint32_t\t%s_tcp_sent;\n" $var
+		printf "uint32_t\t%s_udp_rcvd;\n" $var
+		printf "uint32_t\t%s_udp_sent;\n" $var
+	done
+)
+
+struct socket *	urecv_socket;
+struct inpcb *	urecv_inpcb;
+string		urecv_local;
+string		urecv_remote;
+u_char		urecv_local6;
+u_char		urecv_remote6;
+uint16_t	urecv_lport;
+uint16_t	urecv_rport;
+uint32_t	urecv_length;
+
+BEGIN /* probe ID $ID */
+{${TRACE:+
+	printf("<$ID>");}
+	tcp_rcvd = tcp_sent = 0;
+	udp_rcvd = udp_sent = 0;$( IFS=" "
+	for var in $conf; do
+		printf "\n\t%s_tcp_rcvd = %s_tcp_sent = 0;" $var $var
+		printf "\n\t%s_udp_rcvd = %s_udp_sent = 0;" $var $var
+	done
+)
+}
+
+/****************************** TCP ******************************/
+
+tcp:::send,
+tcp:::receive /* probe ID $(( $ID + 1 )) */
+{${TRACE:+
+	printf("<$(( $ID + 1 ))>");}
+	this->length = (uint32_t)args[2]->ip_plength -
+                (uint8_t)args[4]->tcp_offset;
+}
+
+tcp:::debug-user
+	/arg1 == PRU_RCVD || arg1 == PRU_SEND/
+	/* probe ID $(( $ID + 2 )) */
+{${TRACE:+
+	printf("<$(( $ID + 2 ))>");
+}
+	/*
+	 * tcpsinfo_t *
+	 */
+	this->local  = args[0]->tcps_laddr;
+	this->lport  = args[0]->tcps_lport;
+	this->remote = args[0]->tcps_raddr;
+	this->rport  = args[0]->tcps_rport;
+
+	/*
+	 * IPv6 support
+	 */
+	this->local6 = strstr(this->local, ":") != NULL ? 1 : 0;
+	this->remote6 = strstr(this->remote, ":") != NULL ? 1 : 0;
+	this->local = strjoin(strjoin(this->local6 ? "[" : "",
+		this->local), this->local6 ? "]" : "");
+	this->remote = strjoin(strjoin(this->remote6 ? "[" : "",
+		this->remote), this->remote6 ? "]" : "");
+
+	this->family = "tcp";
+	this->event = prureq_string[arg1];
+}
+
+$( IFS=" "
+	id=$(( $ID + 3 ))
+	for var in $conf; do
+		eval val=\"\$$var\"
+		printf "tcp:::debug-user\n"
+		printf "\t/this->event == \"RCVD\""
+		[ "$_EVENT_TEST" ] && printf " && %s" "$_EVENT_TEST"
+		printf " && (%s)/\n" "$val"
+		printf "\t/* probe ID %u */\n" $id
+		printf "{${TRACE:+\n\tprintf(\"<$id>\");}\n"
+		printf "\t%s_tcp_rcvd += this->length;\n" $var
+		printf "\tthis->length = 0;\n"
+		printf "}\n\n"
+		id=$(( $id + 1 ))
+	done
+)
+
+tcp:::debug-user
+	/this->event == "RCVD"${_EVENT_TEST:+ &&
+		$_EVENT_TEST}${_CONF_OTHER:+ &&
+		$_CONF_OTHER}/
+	/* probe ID $(( $ID + 3 + $nconf )) */
+{${TRACE:+
+	printf("<$(( $ID + 3 + $nconf ))>");}
+	tcp_rcvd += this->length;
+	this->length = 0;
+}
+
+$( IFS=" "
+	id=$(( $ID + 4 + $nconf ))
+	for var in $conf; do
+		eval val=\"\$$var\"
+		printf "tcp:::send\n"
+		printf "\t/"
+		[ "$_EVENT_TEST" ] && printf "%s && " "$_EVENT_TEST"
+		printf "(%s)/\n" "$val"
+		printf "\t/* probe ID %u */\n" $id
+		printf "{${TRACE:+\n\tprintf(\"<$id>\");}\n"
+		printf "\t%s_tcp_sent += this->length;\n" $var
+		printf "\tthis->length = 0;\n"
+		printf "}\n\n"
+		id=$(( $id + 1 ))
+	done
+)
+
+tcp:::send
+	/this->event == "SEND"${_EVENT_TEST:+ &&
+		$_EVENT_TEST}${_CONF_OTHER:+ &&
+		$_CONF_OTHER}/
+	/* probe ID $(( $ID + 4 + $nconf * 2 )) */
+{${TRACE:+
+	printf("<$(( $ID + 4 + $nconf * 2 ))>");}
+	tcp_sent += this->length;
+	this->length = 0;
+}
+
+/****************************** UDP ******************************/
+
+udp:::send /* probe ID $(( $ID + 5 + $nconf * 2 )) */
+{${TRACE:+
+	printf("<$(( $ID + 5 + $nconf * 2 ))");
+}
+	/*
+	 * ipinfo_t *
+	 */
+	this->local  = args[2]->ip_saddr;
+	this->remote = args[2]->ip_daddr;
+
+	/*
+	 * udpinfo_t *
+	 */
+	this->length = (uint16_t)args[4]->udp_length;
+	this->lport  = args[4]->udp_sport;
+	this->rport  = args[4]->udp_dport;
+
+	/*
+	 * IPv6 support
+	 */
+	this->local6 = strstr(this->local, ":") != NULL ? 1 : 0;
+	this->remote6 = strstr(this->remote, ":") != NULL ? 1 : 0;
+	this->local = strjoin(strjoin(this->local6 ? "[" : "",
+		this->local), this->local6 ? "]" : "");
+	this->remote = strjoin(strjoin(this->remote6 ? "[" : "",
+		this->remote), this->remote6 ? "]" : "");
+
+	this->family = "udp";
+	this->event = "SEND";
+}
+
+$( IFS=" "
+	id=$(( $ID + 6 + $nconf * 2 ))
+	for var in $conf; do
+		eval val=\"\$$var\"
+		printf "udp:::send\n"
+		printf "\t/"
+		[ "$_EVENT_TEST" ] && printf "%s && " "$_EVENT_TEST"
+		printf "(%s)/\n" "$val"
+		printf "\t/* probe ID %u */\n" $id
+		printf "{${TRACE:+\n\tprintf(\"<$id>\");}\n"
+		printf "\t%s_udp_sent += this->length;\n" $var
+		printf "\tthis->length = 0;\n"
+		printf "}\n\n"
+		id=$(( $id + 1 ))
+	done
+)
+
+udp:::send
+	/this->event == "SEND"${_EVENT_TEST:+ &&
+		$_EVENT_TEST}${_CONF_OTHER:+ &&
+		$_CONF_OTHER}/
+	/* probe ID $(( $ID + 6 + $nconf * 3 )) */
+{${TRACE:+
+	printf("<$(( $ID + 6 + $nconf * 3 ))>");}
+	udp_sent += this->length;
+	this->length = 0;
+}
+
+udp:::receive /* probe ID $(( $ID + 7 + $nconf * 3 )) */
+{${TRACE:+
+	printf("<$(( $ID + 7 + $nconf * 3 ))>");
+}
+	/*
+	 * csinfo_t *
+	 */
+	urecv_inpcb = (struct inpcb *)args[1]->cs_cid;
+	urecv_socket = urecv_inpcb->inp_socket;
+
+	/*
+	 * ipinfo_t *
+	 */
+	urecv_local  = args[2]->ip_daddr;
+	urecv_remote = args[2]->ip_saddr;
+
+	/*
+	 * udpinfo_t *
+	 */
+	urecv_length = (uint16_t)args[4]->udp_length;
+	urecv_lport  = args[4]->udp_dport;
+	urecv_rport  = args[4]->udp_sport;
+
+	/*
+	 * IPv6 support
+	 */
+	urecv_local6 = strstr(urecv_local, ":") != NULL ? 1 : 0;
+	urecv_remote6 = strstr(urecv_remote, ":") != NULL ? 1 : 0;
+	urecv_local = strjoin(strjoin(urecv_local6 ? "[" : "",
+		urecv_local), urecv_local6 ? "]" : "");
+	urecv_remote = strjoin(strjoin(urecv_remote6 ? "[" : "",
+		urecv_remote), urecv_remote6 ? "]" : "");
+}
+
+fbt::soreceive_dgram:entry
+	/args[0] == urecv_socket/
+	/* probe ID $(( $ID + 8 + $nconf * 3 )) */
+{${TRACE:+
+	printf("<$(( $ID + 8 + $nconf * 3 ))>");}
+	this->local = urecv_local;
+	this->remote = urecv_remote;
+	this->length = urecv_length;
+	this->lport = urecv_lport;
+	this->rport = urecv_rport;
+	this->local6 = urecv_local6;
+	this->remote6 = urecv_remote6;
+
+	this->family = "udp";
+	this->event = "RCVD";
+}
+
+$( IFS=" "
+	id=$(( $ID + 9 + $nconf * 3 ))
+	for var in $conf; do
+		eval val=\"\$$var\"
+		printf "fbt::soreceive_dgram:entry\n"
+		printf "\t/args[0] == urecv_socket"
+		[ "$_EVENT_TEST" ] && printf " && %s" "$_EVENT_TEST"
+		printf " && (%s)/\n" "$val"
+		printf "\t/* probe ID %u */\n" $id
+		printf "{${TRACE:+\n\tprintf(\"<$id>\");}\n"
+		printf "\t%s_udp_rcvd += this->length;\n" $var
+		printf "\tthis->length = 0;\n"
+		printf "}\n\n"
+		id=$(( $id + 1 ))
+	done
+)
+
+fbt::soreceive_dgram:entry
+	/args[0] == urecv_socket${_EVENT_TEST:+ &&
+		$_EVENT_TEST}${_CONF_OTHER:+ &&
+		$_CONF_OTHER}/
+	/* probe ID $(( $ID + 9 + $nconf * 4 )) */
+{${TRACE:+
+	printf("<$(( $ID + 9 + $nconf * 4 ))>");}
+	udp_rcvd += this->length;
+	this->length = 0;
+}
+EOF
+ACTIONS=$( cat <&9 )
+ID=$(( $ID + 10 + $nconf * 4 ))
+
+############################################################ EVENT TAG
+
+# The EVENT_TAG is run inside the print action after the timestamp has been
+# printed. By default, `UID.GID CMD[PID]: ' of the process is printed.
+
+EVENT_TAG="printf(\"${PROFILE%-raw}: \")"
+
+############################################################ EVENT DETAILS
+
+exec 9<<EOF
+	/*
+	 * Print path details
+	 */
+	printf("{\"report_type\":\"$REPORT_TYPE\",\"hostname\":\"$HOSTNAME\",\"epoch\":%u,\"tcp_rcvd\":%u,\"tcp_sent\":%u,\"udp_rcvd\":%u,\"udp_sent\":%u$( IFS=" "
+			for var in $conf; do
+				printf ",\\\\\"%s_tcp_rcvd\\\\\":%%u" $var
+				printf ",\\\\\"%s_tcp_sent\\\\\":%%u" $var
+				printf ",\\\\\"%s_udp_rcvd\\\\\":%%u" $var
+				printf ",\\\\\"%s_udp_sent\\\\\":%%u" $var
+			done
+		)}",
+		walltimestamp / 1000000000,
+			tcp_rcvd, tcp_sent,
+			udp_rcvd, udp_sent$( IFS=" "
+			for var in $conf; do
+				printf ",\n\t\t\t%s_tcp_rcvd" $var
+				printf ", %s_tcp_sent" $var
+				printf ",\n\t\t\t%s_udp_rcvd" $var
+				printf ", %s_udp_sent" $var
+			done
+		));
+
+	/*
+	 * Reset counters
+	 */
+	tcp_rcvd = tcp_sent = 0;
+	udp_rcvd = udp_sent = 0;
+$( IFS=" "
+	for var in $conf; do
+		printf "\t%s_tcp_rcvd = %s_tcp_sent = 0;\n" $var $var
+		printf "\t%s_udp_rcvd = %s_udp_sent = 0;\n" $var $var
+	done
+)
+EOF
+EVENT_DETAILS=$( cat <&9 )
+
+################################################################################
+# END
+################################################################################
