@@ -4,7 +4,7 @@
 #
 # $Title: dwatch(8) JSON module for network activity $
 # $Copyright: 2014-2018 Devin Teske. All rights reserved. $
-# $FrauBSD: dwatch-json/json-net-config-raw 2018-10-01 16:18:52 -0700 freebsdfrau $
+# $FrauBSD: dwatch-json/json-net-config-raw 2018-10-01 16:20:48 -0700 freebsdfrau $
 #
 ############################################################ DESCRIPTION
 #
@@ -140,9 +140,7 @@ tcp:::receive /* probe ID $(( $ID + 1 )) */
                 (uint8_t)args[4]->tcp_offset;
 }
 
-tcp:::debug-user
-	/arg1 == PRU_RCVD || arg1 == PRU_SEND/
-	/* probe ID $(( $ID + 2 )) */
+tcp:::debug-user /* probe ID $(( $ID + 2 )) */
 {${TRACE:+
 	printf("<$(( $ID + 2 ))>");
 }
@@ -213,11 +211,8 @@ $( IFS=" "
 	done
 )
 
-tcp:::send
-	/this->event == "SEND"${_EVENT_TEST:+ &&
-		$_EVENT_TEST}${_CONF_OTHER:+ &&
-		$_CONF_OTHER}/
-	/* probe ID $(( $ID + 4 + $nconf * 2 )) */
+tcp:::send /1${_EVENT_TEST:+ && $_EVENT_TEST}${_CONF_OTHER:+ &&
+		$_CONF_OTHER}/ /* probe ID $(( $ID + 4 + $nconf * 2 )) */
 {${TRACE:+
 	printf("<$(( $ID + 4 + $nconf * 2 ))>");}
 	tcp_sent += this->length;
@@ -274,11 +269,8 @@ $( IFS=" "
 	done
 )
 
-udp:::send
-	/this->event == "SEND"${_EVENT_TEST:+ &&
-		$_EVENT_TEST}${_CONF_OTHER:+ &&
-		$_CONF_OTHER}/
-	/* probe ID $(( $ID + 6 + $nconf * 3 )) */
+udp:::send /1${_EVENT_TEST:+ && $_EVENT_TEST}${_CONF_OTHER:+ &&
+		$_CONF_OTHER}/ /* probe ID $(( $ID + 6 + $nconf * 3 )) */
 {${TRACE:+
 	printf("<$(( $ID + 6 + $nconf * 3 ))>");}
 	udp_sent += this->length;
