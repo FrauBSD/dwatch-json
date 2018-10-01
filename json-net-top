@@ -4,7 +4,7 @@
 #
 # $Title: dwatch(8) JSON module for network activity $
 # $Copyright: 2014-2018 Devin Teske. All rights reserved. $
-# $FrauBSD: dwatch-json/json-net-top 2018-09-30 18:39:06 -0700 freebsdfrau $
+# $FrauBSD: dwatch-json/json-net-top 2018-09-30 18:49:16 -0700 freebsdfrau $
 #
 ############################################################ DESCRIPTION
 #
@@ -109,7 +109,7 @@ eval "$( echo "$EVENT_TEST" | awk -v argv="$ARGV" '
 
 ############################################################ PROBE
 
-_RAW_PROFILE=json-net-top-raw
+_RAW_PROFILE=$PROFILE-raw
 load_profile $_RAW_PROFILE
 
 ############################################################ MAIN
