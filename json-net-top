@@ -4,7 +4,7 @@
 #
 # $Title: dwatch(8) JSON module for network activity $
 # $Copyright: 2014-2018 Devin Teske. All rights reserved. $
-# $FrauBSD: dwatch-json/json-net-top 2018-09-20 14:46:58 -0700 freebsdfrau $
+# $FrauBSD: dwatch-json/json-net-top 2018-09-30 18:39:06 -0700 freebsdfrau $
 #
 ############################################################ DESCRIPTION
 #
@@ -20,8 +20,13 @@ eval "$( echo "$EVENT_TEST" | awk -v argv="$ARGV" '
 	}
 	$0 { buf = buf $0 }
 	END {
+		#
+		# EVENT_TEST for -k "ssh"
+		# execname == "ssh"
+		#
 		head = buf
-		while (match(head, "execname == \"[^\"]*\"")) {
+		tail = ""
+		while (match(head, /execname == "[^"]*"/)) {
 			tail = substr(head, 1, RSTART - 1)
 			repl = substr(head, RSTART, RLENGTH)
 			head = substr(head, RSTART + RLENGTH)
@@ -31,8 +36,73 @@ eval "$( echo "$EVENT_TEST" | awk -v argv="$ARGV" '
 			sub(/"$/, "", repl)
 			argv = argv " -k \"" repl "\""
 		}
-		tail = tail head
-		set("EVENT_TEST", tail)
+		buf = tail head
+
+		#
+		# EVENT_TEST for -k "ssh*"
+		# strstr(execname, "ssh") == execname
+		#
+		head = buf
+		tail = ""
+		while (match(head, "strstr\\(execname, \"[^\"]*\"\\) == " \
+			"execname")) \
+		{
+			tail = substr(head, 1, RSTART - 1)
+			repl = substr(head, RSTART, RLENGTH)
+			head = substr(head, RSTART + RLENGTH)
+			if (sub(/ \|\|[[:space:]]*\(/, "", head))
+				sub(/\)$/, "", head)
+			sub(/^strstr\(execname, "/, "", repl)
+			sub(/"\) == execname$/, "", repl)
+			argv = argv " -k \"" repl "*\""
+		}
+		buf = tail head
+
+		#
+		# EVENT_TEST for -k "*ssh"
+		# strstr(execname, "ssh") == (execname + strlen(execname) - 3)
+		#
+		head = buf
+		tail = ""
+		while (match(head, "strstr\\(execname, \"[^\"]*\"\\) == " \
+			"\\(execname \\+ strlen\\(execname\\) - " \
+			"[[:digit:]]+\\)")) \
+		{
+			tail = substr(head, 1, RSTART - 1)
+			repl = substr(head, RSTART, RLENGTH)
+			head = substr(head, RSTART + RLENGTH)
+			if (sub(/ \|\|[[:space:]]*\(/, "", head))
+				sub(/\)$/, "", head)
+			sub(/^strstr\(execname, "/, "", repl)
+			sub("\"\\) == \\(execname \\+ strlen\\(execname\\)" \
+				" - [[:digit:]]+\\)", "", repl)
+			argv = argv " -k \"*" repl "\""
+		}
+		buf = tail head
+
+		#
+		# EVENT_TEST for -j num
+		# curthread->td_proc->p_ucred->cr_prison->pr_id == num
+		#
+		head = argv
+		tail = ""
+		argj = ""
+		while (match(head,
+			/(^|[[:space:]]+)-j [0-9]+([[:space:]]+|$)/)) \
+		{
+			tail = substr(head, 1, RSTART - 1)
+			repl = substr(head, RSTART, RLENGTH)
+			head = substr(head, RSTART + RLENGTH)
+			sub(/^[[:space:]]*-j /, "", repl)
+			match(repl, /[[:space:]]*$/)
+			head = substr(repl, RSTART, RLENGTH) head
+			repl = substr(repl, 1, RSTART - 1)
+			argj = argj " -t \"curthread->td_proc->p_ucred" \
+				"->cr_prison->pr_id == " repl "\""
+		}
+		argv = tail head argj
+
+		set("EVENT_TEST", buf)
 		set("ARGV", argv)
 	}
 ' )"
