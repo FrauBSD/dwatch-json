@@ -4,7 +4,7 @@
 #
 # $Title: dwatch(8) JSON module for network activity $
 # $Copyright: 2014-2018 Devin Teske. All rights reserved. $
-# $FrauBSD: dwatch-json/json-net-raw 2018-10-01 16:07:12 -0700 freebsdfrau $
+# $FrauBSD: dwatch-json/json-net-raw 2018-10-01 16:08:27 -0700 freebsdfrau $
 #
 ############################################################ DESCRIPTION
 #
@@ -194,8 +194,8 @@ fbt::soreceive_dgram:entry
 	this->local6 = urecv_local6;
 	this->remote6 = urecv_remote6;
 
-	this->event = "RCVD";
 	this->family = "udp";
+	this->event = "RCVD";
 }
 EOF
 ACTIONS=$( cat <&9 )
