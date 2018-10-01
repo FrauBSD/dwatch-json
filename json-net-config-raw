@@ -4,7 +4,7 @@
 #
 # $Title: dwatch(8) JSON module for network activity $
 # $Copyright: 2014-2018 Devin Teske. All rights reserved. $
-# $FrauBSD: dwatch-json/json-net-config-raw 2018-10-01 15:01:11 -0700 freebsdfrau $
+# $FrauBSD: dwatch-json/json-net-config-raw 2018-10-01 16:18:52 -0700 freebsdfrau $
 #
 ############################################################ DESCRIPTION
 #
@@ -79,7 +79,7 @@ for var in $conf; do
 	eval val=\"\$$var\"
 	_CONF_OTHER="$_CONF_OTHER || ($val)"
 done
-_CONF_OTHER="!(${_CONF_OTHER# || })"
+[ "$_CONF_OTHER" ] && _CONF_OTHER="!(${_CONF_OTHER# || })"
 
 ############################################################ ACTIONS
 
